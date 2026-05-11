@@ -20,7 +20,8 @@ from libdyson import get_device
 
 _LOG = logging.getLogger(__name__)
 
-_RECONNECT_DELAY = 10.0
+_RECONNECT_DELAY = 3.0
+_ALIVE_POLL = 1.0
 
 
 class DysonClient:
@@ -41,6 +42,10 @@ class DysonClient:
         self._connected = False
         self._stopped = False
         self._task: asyncio.Task | None = None
+        # Cache the IP across reconnect cycles so we skip mDNS resolution
+        # on every retry — mDNS lookup is 500ms-2s and the IP rarely
+        # changes mid-session.
+        self._cached_ip: str | None = None
 
     @property
     def device(self):
@@ -69,10 +74,17 @@ class DysonClient:
                 pass
 
     def _resolve_host(self) -> str | None:
+        # Try the cached IP first — mDNS adds 500ms-2s and is unnecessary
+        # if the device hasn't moved. We only re-resolve on cold start or
+        # after a cached-IP connect fails.
+        if self._cached_ip:
+            return self._cached_ip
         # Dyson serials encode region + variant (e.g. "AAA-XX-ZZZ0000A"); mDNS hostname is lowercased.
         hostname = f"{self.serial.lower()}.local"
         try:
-            return socket.gethostbyname(hostname)
+            ip = socket.gethostbyname(hostname)
+            self._cached_ip = ip
+            return ip
         except OSError as exc:
             _LOG.warning("mDNS resolve failed for %s: %s", hostname, exc)
             return None
@@ -107,11 +119,26 @@ class DysonClient:
                 await self._loop.run_in_executor(None, device.connect, host)
             except Exception as exc:
                 _LOG.warning("dyson connect failed (%s) — retry in %ss", exc, _RECONNECT_DELAY)
+                # If the cached IP failed, drop it so the next iteration
+                # re-resolves via mDNS (device may have moved on the LAN).
+                self._cached_ip = None
                 await asyncio.sleep(_RECONNECT_DELAY)
                 continue
             self._device = device
             self._connected = True
             _LOG.info("connected to %s at %s", self.serial, host)
+
+            # Ask the fan to push its full state immediately so the UCR3
+            # tiles paint with real values right away instead of waiting
+            # for the device's next periodic push.
+            try:
+                if hasattr(device, "request_current_status"):
+                    await self._loop.run_in_executor(None, device.request_current_status)
+                if hasattr(device, "request_environmental_data"):
+                    await self._loop.run_in_executor(None, device.request_environmental_data)
+            except Exception as exc:
+                _LOG.debug("eager state request failed (non-fatal): %s", exc)
+
             # Notify entities so they refresh from the now-populated state.
             self._on_message(None)
 
@@ -121,7 +148,7 @@ class DysonClient:
                 # and let on_message do the work. Poll for disconnect.
                 if not getattr(device, "is_connected", True):
                     break
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(_ALIVE_POLL)
 
             self._connected = False
             try:

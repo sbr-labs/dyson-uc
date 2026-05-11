@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.0 — 2026-05-11
+
+- Real-time responsiveness improvements:
+  - Cache the device's resolved LAN IP across reconnect attempts so we skip mDNS lookup (500ms-2s) on every retry. Cache invalidates on a failed connect so we re-resolve if the device moves on the LAN.
+  - Eagerly call `request_current_status` + `request_environmental_data` right after MQTT connect so the entity tiles paint with real values immediately instead of waiting for the fan's next periodic push (saves 2-5s on first paint).
+  - Reconnect delay 10s → 3s. Disconnect-poll cadence 2s → 1s.
+  - New `EXIT_STANDBY` handler — when the remote wakes from sleep, the integration immediately requests a fresh state pull so the user doesn't see stale values for a few seconds after waking the remote.
+
 ## 0.13.0 — 2026-05-11
 
 - Wire up the climate widget for Hot+Cool models (HP04/07/09):

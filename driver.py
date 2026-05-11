@@ -896,6 +896,24 @@ async def on_disconnect(_api: ucapi.IntegrationAPI) -> None:
     _clients.clear()
 
 
+async def on_exit_standby(api: ucapi.IntegrationAPI) -> None:
+    """When the remote wakes from standby, force a fresh state pull so the
+    user sees current values instantly instead of waiting for the next
+    periodic MQTT push."""
+    for serial, client in _clients.items():
+        if client.device is None:
+            continue
+        loop = asyncio.get_running_loop()
+        try:
+            if hasattr(client.device, "request_current_status"):
+                await loop.run_in_executor(None, client.device.request_current_status)
+            if hasattr(client.device, "request_environmental_data"):
+                await loop.run_in_executor(None, client.device.request_environmental_data)
+        except Exception as exc:
+            _LOG.debug("exit-standby refresh failed for %s: %s", serial, exc)
+        _refresh_attrs(api, serial)
+
+
 def main() -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -908,6 +926,7 @@ def main() -> None:
 
     api.add_listener(ucapi.Events.CONNECT, lambda: on_connect(api))
     api.add_listener(ucapi.Events.DISCONNECT, lambda: on_disconnect(api))
+    api.add_listener(ucapi.Events.EXIT_STANDBY, lambda: on_exit_standby(api))
 
     loop.run_until_complete(api.init(str(driver_json), _setup))
     loop.run_forever()
