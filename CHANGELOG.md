@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.0 — 2026-05-11
+
+- Wire up the climate widget for Hot+Cool models (HP04/07/09):
+  - `TARGET_TEMPERATURE` command now calls `set_heat_target` and enables heat mode.
+  - `HVAC_MODE: HEAT` enables heat mode; `AUTO`/`FAN` disable it.
+  - `heat_target` and `heat_mode_is_on` are surfaced on the climate attributes so the thermostat slider tracks reality.
+  - Climate options now declare 1-37°C target range, 1°C step, Celsius.
+- Cool-only models (TP04-11, DP04, PH01-04, BP02-04) unchanged — they keep the simpler power-switch + temperature-sensor layout.
+
 ## 0.12.0 — 2026-05-11
 
 Initial public release.

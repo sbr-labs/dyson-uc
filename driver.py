@@ -56,6 +56,7 @@ CONFIG_FILENAME = "dyson_config.json"
 _HVAC_OFF = "OFF"
 _HVAC_FAN = "FAN"
 _HVAC_AUTO = "AUTO"
+_HVAC_HEAT = "HEAT"
 _FAN_MODES = [str(i) for i in range(1, 11)]
 _SPEED_AUTO = "Auto"
 _SPEED_OPTIONS = [_SPEED_AUTO] + _FAN_MODES
@@ -97,6 +98,8 @@ def _safe_id(serial: str) -> str:
 def _climate_state(device) -> str:
     if device is None or not getattr(device, "is_on", False):
         return climate.States.OFF.value
+    if getattr(device, "heat_mode_is_on", False):
+        return climate.States.HEAT.value
     if getattr(device, "auto_mode", False):
         return climate.States.AUTO.value
     return climate.States.FAN.value
@@ -123,6 +126,13 @@ def _climate_attrs(device) -> dict[str, Any]:
     speed = getattr(device, "speed", None)
     if isinstance(speed, int) and 1 <= speed <= 10:
         attrs[climate.Attributes.FAN_MODE.value] = str(speed)
+    # HotCool-only: surface the heat target so the thermostat slider works.
+    target = getattr(device, "heat_target", None)
+    if target is not None:
+        try:
+            attrs[climate.Attributes.TARGET_TEMPERATURE.value] = round(float(target), 1)
+        except (TypeError, ValueError):
+            pass
     return attrs
 
 
@@ -151,11 +161,36 @@ async def _climate_cmd(entity, cmd_id: str, params: dict | None) -> ucapi.Status
             elif mode == _HVAC_AUTO:
                 await run(d.turn_on)
                 await run(d.enable_auto_mode)
+                if hasattr(d, "disable_heat_mode"):
+                    await run(d.disable_heat_mode)
             elif mode == _HVAC_FAN:
                 await run(d.turn_on)
                 await run(d.disable_auto_mode)
+                if hasattr(d, "disable_heat_mode"):
+                    await run(d.disable_heat_mode)
+            elif mode == _HVAC_HEAT:
+                if not hasattr(d, "enable_heat_mode"):
+                    return ucapi.StatusCodes.NOT_IMPLEMENTED
+                await run(d.turn_on)
+                await run(d.enable_heat_mode)
             else:
                 return ucapi.StatusCodes.BAD_REQUEST
+        elif cmd_id == climate.Commands.TARGET_TEMPERATURE.value:
+            if not hasattr(d, "set_heat_target"):
+                return ucapi.StatusCodes.NOT_IMPLEMENTED
+            target = (params or {}).get("temperature")
+            try:
+                target_c = float(target)
+            except (TypeError, ValueError):
+                return ucapi.StatusCodes.BAD_REQUEST
+            # Dyson firmware clamps internally; we mirror the documented
+            # 1-37°C range so the UCR3 slider can't ask for impossible values.
+            target_c = max(1.0, min(37.0, target_c))
+            # Setting a target implies heating intent — enable heat mode + on.
+            if not getattr(d, "is_on", False):
+                await run(d.turn_on)
+            await run(d.enable_heat_mode)
+            await run(d.set_heat_target, target_c)
         elif cmd_id == climate.Commands.FAN_MODE.value:
             fm = (params or {}).get("fan_mode")
             try:
@@ -401,7 +436,13 @@ def _build_entities(api: ucapi.IntegrationAPI, dev_cfg: dict[str, Any]) -> list:
                 climate.Features.TARGET_TEMPERATURE,
             ],
             attributes={climate.Attributes.STATE.value: climate.States.OFF.value},
-            options={climate.Options.FAN_MODES.value: _FAN_MODES},
+            options={
+                climate.Options.FAN_MODES.value: _FAN_MODES,
+                climate.Options.MIN_TEMPERATURE.value: 1,
+                climate.Options.MAX_TEMPERATURE.value: 37,
+                climate.Options.TARGET_TEMPERATURE_STEP.value: 1,
+                climate.Options.TEMPERATURE_UNIT.value: "CELSIUS",
+            },
             icon="uc:fan",
             area=name,
             cmd_handler=_climate_cmd,
