@@ -1,0 +1,17 @@
+# Secrets — local MQTT credentials fetched via OTP flow.
+creds.json
+
+# Build artifacts — release tarballs are shipped via gh release attachments,
+# not committed. pkg_root/ is always re-staged by the build, never edited
+# directly.
+build_out/
+pkg_root/
+*.tar.gz
+
+# Python runtime
+.venv/
+__pycache__/
+*.pyc
+
+# Test scratch
+.phase1_tmp/

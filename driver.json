@@ -1,0 +1,80 @@
+{
+  "driver_id": "uc_intg_dyson_sbr",
+  "version": "0.12.0",
+  "min_core_api": "0.22.0",
+  "name": {
+    "en": "Dyson (local)"
+  },
+  "icon": "uc:fan",
+  "description": {
+    "en": "Local control for Wi-Fi Dyson purifiers, fans, heaters and humidifiers. One-time cloud sign-in retrieves the device's local MQTT password, after which everything runs entirely on your LAN — no cloud calls during use. Push-driven state, instant response. Supports TP04/07/09, HP04/07/09, PH01-04, DP04, BP02-04."
+  },
+  "developer": {
+    "name": "sbr-labs",
+    "url": "https://github.com/sbr-labs/dyson-uc"
+  },
+  "home_page": "https://github.com/sbr-labs/dyson-uc",
+  "release_date": "2026-05-11",
+  "setup_data_schema": {
+    "title": { "en": "Dyson setup" },
+    "settings": [
+      {
+        "id": "info",
+        "label": { "en": "Two ways to set up" },
+        "field": {
+          "label": {
+            "value": {
+              "en": "EITHER fill the EMAIL + PASSWORD + REGION fields (we'll send an OTP and fetch local creds for you — one time only)\n\nOR fill the SERIAL + LOCAL CREDENTIAL + PRODUCT TYPE fields directly if you already have them (skips cloud entirely — best for re-installs)."
+            }
+          }
+        }
+      },
+      {
+        "id": "email",
+        "label": { "en": "Dyson account email (cloud path)" },
+        "field": { "text": { "value": "" } }
+      },
+      {
+        "id": "password",
+        "label": { "en": "Dyson account password (cloud path)" },
+        "field": { "password": { "value": "" } }
+      },
+      {
+        "id": "region",
+        "label": { "en": "Region (2-letter, cloud path)" },
+        "field": { "text": { "value": "GB" } }
+      },
+      {
+        "id": "manual_info",
+        "label": { "en": "— or — paste local credentials directly" },
+        "field": {
+          "label": {
+            "value": {
+              "en": "Fill these to skip the cloud step. Find these values in your last setup's saved config (the integration will tell you in logs after first successful setup)."
+            }
+          }
+        }
+      },
+      {
+        "id": "manual_serial",
+        "label": { "en": "Device serial (e.g. AAA-XX-ZZZ0000A)" },
+        "field": { "text": { "value": "" } }
+      },
+      {
+        "id": "manual_credential",
+        "label": { "en": "Local MQTT credential" },
+        "field": { "password": { "value": "" } }
+      },
+      {
+        "id": "manual_product_type",
+        "label": { "en": "Product type code (e.g. 438K for TP09)" },
+        "field": { "text": { "value": "" } }
+      },
+      {
+        "id": "manual_name",
+        "label": { "en": "Display name (optional)" },
+        "field": { "text": { "value": "" } }
+      }
+    ]
+  }
+}
