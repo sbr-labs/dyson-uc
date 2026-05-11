@@ -63,6 +63,9 @@ _SPEED_OPTIONS = [_SPEED_AUTO] + _FAN_MODES
 
 _setup_state = DysonCloudSetup()
 _clients: dict[str, DysonClient] = {}
+# Module-level handle to the IntegrationAPI so command handlers can push
+# optimistic state updates without waiting for the fan's MQTT confirmation.
+_api_ref: ucapi.IntegrationAPI | None = None
 
 
 def _config_path(api: ucapi.IntegrationAPI) -> Path:
@@ -240,10 +243,13 @@ async def _switch_cmd(entity, cmd_id: str, _params: dict | None) -> ucapi.Status
     if on_fn is None or off_fn is None:
         return ucapi.StatusCodes.NOT_IMPLEMENTED
     try:
+        target: bool | None = None
         if cmd_id == switch.Commands.ON.value:
             await run(on_fn)
+            target = True
         elif cmd_id == switch.Commands.OFF.value:
             await run(off_fn)
+            target = False
         elif cmd_id == switch.Commands.TOGGLE.value:
             current = {
                 "power": getattr(d, "is_on", False),
@@ -253,6 +259,12 @@ async def _switch_cmd(entity, cmd_id: str, _params: dict | None) -> ucapi.Status
                 "diffuse": not getattr(d, "front_airflow", True),
             }.get(feature, False)
             await run(off_fn if current else on_fn)
+            target = not current
+        if target is not None:
+            _optimistic_update(entity.id, {
+                switch.Attributes.STATE.value:
+                    switch.States.ON.value if target else switch.States.OFF.value,
+            })
         return ucapi.StatusCodes.OK
     except Exception as exc:
         _LOG.warning("switch cmd %s failed: %s", cmd_id, exc)
@@ -379,6 +391,11 @@ async def _select_cmd(entity, cmd_id: str, params: dict | None) -> ucapi.StatusC
                 await run(d.enable_oscillation, low, high)
             else:
                 return ucapi.StatusCodes.BAD_REQUEST
+            _optimistic_update(entity.id, {
+                select.Attributes.STATE.value: select.States.ON.value,
+                select.Attributes.CURRENT_OPTION.value: option,
+                select.Attributes.OPTIONS.value: list(OSC_PRESETS),
+            })
         elif feature == "direction":
             new_centre = DIRECTION_TO_CENTRE.get(option)
             if new_centre is None:
@@ -390,6 +407,11 @@ async def _select_cmd(entity, cmd_id: str, params: dict | None) -> ucapi.StatusC
             cur_span = (cur_high - cur_low) if (cur_low is not None and cur_high is not None) else 45
             low, high = compose_oscillation(new_centre, cur_span)
             await run(d.enable_oscillation, low, high)
+            _optimistic_update(entity.id, {
+                select.Attributes.STATE.value: select.States.ON.value,
+                select.Attributes.CURRENT_OPTION.value: option,
+                select.Attributes.OPTIONS.value: list(DIRECTION_PRESETS),
+            })
         else:  # speed
             if option == _SPEED_AUTO:
                 if not getattr(d, "is_on", True):
@@ -405,6 +427,11 @@ async def _select_cmd(entity, cmd_id: str, params: dict | None) -> ucapi.StatusC
                 if getattr(d, "auto_mode", False):
                     await run(d.disable_auto_mode)
                 await run(d.set_speed, target)
+            _optimistic_update(entity.id, {
+                select.Attributes.STATE.value: select.States.ON.value,
+                select.Attributes.CURRENT_OPTION.value: option,
+                select.Attributes.OPTIONS.value: list(_SPEED_OPTIONS),
+            })
         return ucapi.StatusCodes.OK
     except Exception as exc:
         _LOG.warning("select %s failed: %s", feature, exc)
@@ -790,6 +817,19 @@ def _start_client(api: ucapi.IntegrationAPI, dev_cfg: dict[str, Any]) -> None:
     client.start()
 
 
+def _optimistic_update(entity_id: str, attrs: dict) -> None:
+    """Push attribute changes to UCR3 immediately after we issue a command,
+    without waiting for the fan's MQTT echo. Makes the tile feel snappy on
+    touch. If the command actually fails, the next real state push will
+    correct the display within 1-2 seconds."""
+    if _api_ref is None:
+        return
+    try:
+        _api_ref.configured_entities.update_attributes(entity_id, attrs)
+    except Exception as exc:
+        _LOG.debug("optimistic update failed (non-fatal): %s", exc)
+
+
 async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAction:
     if isinstance(msg, DriverSetupRequest):
         data = msg.setup_data or {}
@@ -881,6 +921,8 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
 
 
 async def on_connect(api: ucapi.IntegrationAPI) -> None:
+    global _api_ref
+    _api_ref = api
     cfg = _load_config(api)
     for dev in cfg.get("devices", []):
         for e in _build_entities(api, dev):

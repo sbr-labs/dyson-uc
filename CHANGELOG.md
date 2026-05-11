@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0 — 2026-05-11
+
+- **Optimistic UI updates** — tiles now reflect the new state the instant you tap, rather than waiting 1-2 seconds for the fan to round-trip the MQTT state push. Applies to night mode, continuous monitoring, diffuse mode, power, fan speed, oscillation sweep, and direction picker. The real state confirmation from the fan still arrives shortly after and corrects the display if the command somehow didn't land.
+
 ## 0.14.0 — 2026-05-11
 
 - Real-time responsiveness improvements:
