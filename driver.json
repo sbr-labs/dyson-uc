@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_intg_dyson_sbr",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "min_core_api": "0.22.0",
   "name": {
     "en": "Dyson (local)"
@@ -50,14 +50,14 @@
         "field": {
           "label": {
             "value": {
-              "en": "Fill this if mDNS doesn't work on your network (e.g. fan on a different VLAN, mesh-router AP isolation). The integration will connect directly to this IP and skip mDNS. Works whether you use the cloud OTP path above or the manual path below."
+              "en": "Fill this if mDNS doesn't work for one or more of your fans (e.g. on a different VLAN, mesh-router AP isolation).\n\nONE FAN: paste a plain IP, e.g. 192.168.1.42 — applied to every device fetched.\n\nMULTIPLE FANS: paste SERIAL=IP pairs separated by commas, e.g.\n  AAA-XX-ZZZ0000A=192.168.1.42, BBB-YY-WWW1111B=192.168.5.10\n\nEach fan that needs an override must have its own correct IP. Devices not listed fall back to mDNS as normal — leave reachable fans out of the mapping.\n\nTip: reserve a static DHCP lease in your router for each fan you list here so the IP stays constant."
             }
           }
         }
       },
       {
         "id": "static_ip",
-        "label": { "en": "Static LAN IP (e.g. 192.168.1.42)" },
+        "label": { "en": "Static LAN IP / SERIAL=IP pairs" },
         "field": { "text": { "value": "" } }
       },
       {

@@ -30,11 +30,12 @@ class DysonCloudSetup:
     def __init__(self) -> None:
         self._verify: Callable[[str, str], dict] | None = None
         self._password: str | None = None
-        # Optional static LAN IP carried across the OTP round-trip so the
-        # final SetupComplete can apply it to every device fetched from the
-        # cloud — same field works for users whose fan is on a VLAN where
-        # mDNS doesn't reach the UCR3.
-        self.static_ip: str | None = None
+        # Static IP mapping carried across the OTP round-trip. Key is the
+        # device serial (uppercase); value is the LAN IP. Special key "*"
+        # means "apply to every device" (the v0.19.0 single-IP behaviour).
+        # Users with multiple fans where only some are cross-VLAN can list
+        # only those serials and the others fall back to mDNS as normal.
+        self.static_ips: dict[str, str] = {}
 
     def request_otp(self, email: str, password: str, region: str) -> None:
         if not email or not password:

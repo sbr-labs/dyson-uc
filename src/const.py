@@ -78,6 +78,45 @@ def direction_from_centre(centre: int) -> str:
     return best[0]
 
 
+def parse_static_ips(raw: str) -> dict[str, str]:
+    """Parse the Static LAN IP setup field into a serial→IP mapping.
+
+    Accepted forms:
+      1. Empty / whitespace → returns {}
+      2. Single IP like "192.168.1.42" → returns {"*": "192.168.1.42"}
+         (applied to every device the cloud returns; v0.19.0 behaviour)
+      3. SERIAL=IP pairs separated by comma or newline → returns mapping:
+           "AAA-XX-ZZZ0000A=192.168.1.42, BBB-YY-WWW1111B=192.168.5.10"
+         Only listed serials get the static IP; others fall back to mDNS.
+
+    Serial is uppercased so case-insensitive comparison works at lookup time.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    # No "=" / ":" anywhere → treat as a single IP that applies to all.
+    if "=" not in text and ":" not in text:
+        return {"*": text}
+    out: dict[str, str] = {}
+    # Split on commas and newlines so users can paste either form.
+    parts = text.replace("\n", ",").split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            serial, ip = part.split("=", 1)
+        elif ":" in part:
+            serial, ip = part.split(":", 1)
+        else:
+            continue
+        serial = serial.strip().upper()
+        ip = ip.strip()
+        if serial and ip:
+            out[serial] = ip
+    return out
+
+
 def compose_oscillation(centre: int, span: int) -> tuple[int, int]:
     """Build a (low, high) pair centred on `centre` with total width `span`,
     clamped into the firmware's allowed 0..350 range."""

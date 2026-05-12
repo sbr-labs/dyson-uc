@@ -43,6 +43,10 @@ class DysonClient:
         self._connected = False
         self._stopped = False
         self._task: asyncio.Task | None = None
+        # First-state-after-connect flag — flipped to False once the driver
+        # has done its UCR3 tile-cache blink on the initial connect. Stops
+        # the blink from re-firing on every MQTT reconnect after that.
+        self.first_connect_pending = True
         # User-supplied LAN IP from setup config. If set, we skip mDNS
         # entirely and always connect directly to this address. Used when
         # the user's network doesn't resolve the device's .local hostname

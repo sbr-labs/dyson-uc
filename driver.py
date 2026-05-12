@@ -42,6 +42,7 @@ from src.const import (
     compose_oscillation,
     direction_from_centre,
     osc_preset_from_angles,
+    parse_static_ips,
 )
 from src.dyson_client import DysonClient
 
@@ -797,6 +798,60 @@ def _refresh_attrs(api: ucapi.IntegrationAPI, serial: str) -> None:
             _LOG.warning("sensor %s refresh failed: %s", key, exc)
 
 
+_DEVICE_ENTITY_SUFFIXES = (
+    "climate", "power", "temperature", "speed", "night", "monitoring",
+    "diffuse", "osc_angle", "direction", "dial", "humidity",
+    "pm25", "pm10", "voc", "no2", "hepa", "carbon", "hcho",
+)
+
+
+async def _blink_then_refresh(api: ucapi.IntegrationAPI, serial: str) -> None:
+    """First-connect tile-cache refresh hack.
+
+    UCR3 caches each tile's last-rendered state on its Home Screen and
+    Activity pages. If the integration was reinstalled or the daemon
+    restarted while those tiles were on screen as UNAVAILABLE, the cached
+    state sticks until a full reboot — even though entity_change events
+    flow normally.
+
+    Workaround: set every entity for this device to UNAVAILABLE for
+    ~300ms, then push real values via the normal refresh. The two
+    distinct state transitions force the touchscreen renderer to redraw.
+
+    Only fires once per device per daemon lifetime — subsequent MQTT
+    reconnects skip the blink (the touchscreen has already cached the
+    correct values by then).
+    """
+    # Wipe the dedup cache for this device so both the UNAVAILABLE push
+    # and the subsequent real-value refresh get through.
+    prefix = f"{serial}__"
+    for key in [k for k in _last_attrs if k.startswith(prefix)]:
+        _last_attrs.pop(key, None)
+
+    # Push UNAVAILABLE to every entity we know exists for this device.
+    for suffix in _DEVICE_ENTITY_SUFFIXES:
+        entity_id = f"{prefix}{suffix}"
+        if not api.configured_entities.contains(entity_id):
+            continue
+        try:
+            api.configured_entities.update_attributes(
+                entity_id, {"state": "UNAVAILABLE"}
+            )
+        except Exception as exc:
+            _LOG.debug("blink unavailable %s: %s", entity_id, exc)
+
+    # Let the UCR3 renderer notice the UNAVAILABLE state.
+    await asyncio.sleep(0.3)
+
+    # Wipe the cache again so the real-value refresh isn't deduped
+    # against the UNAVAILABLE we just pushed.
+    for key in [k for k in _last_attrs if k.startswith(prefix)]:
+        _last_attrs.pop(key, None)
+
+    # Push real current values.
+    _refresh_attrs(api, serial)
+
+
 def _start_client(api: ucapi.IntegrationAPI, dev_cfg: dict[str, Any]) -> None:
     serial = dev_cfg["serial"]
     if serial in _clients:
@@ -805,6 +860,15 @@ def _start_client(api: ucapi.IntegrationAPI, dev_cfg: dict[str, Any]) -> None:
     loop = asyncio.get_event_loop()
 
     async def on_state_change():
+        # Fan just came up — do the one-shot tile-cache blink instead of
+        # a plain refresh so UCR3 redraws Home Screen widgets even if
+        # they cached UNAVAILABLE from a prior install/reinstall.
+        client_ref = _clients.get(serial)
+        if client_ref is not None and client_ref.first_connect_pending:
+            client_ref.first_connect_pending = False
+            _LOG.info("first state push for %s — running tile-cache blink", serial)
+            await _blink_then_refresh(api, serial)
+            return
         _refresh_attrs(api, serial)
 
     client = DysonClient(
@@ -858,9 +922,12 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
         m_pt = (data.get("manual_product_type") or "").strip()
         m_name = (data.get("manual_name") or "").strip()
 
-        # Static IP override applies regardless of path — cross-VLAN setups
-        # where mDNS doesn't reach the UCR3 need it for either flow.
-        static_ip = (data.get("static_ip") or data.get("manual_ip") or "").strip()
+        # Static IP override applies regardless of path. Accepts either a
+        # bare IP (legacy single-device form) or SERIAL=IP pairs for
+        # multi-device cross-VLAN setups.
+        static_ips = parse_static_ips(
+            data.get("static_ip") or data.get("manual_ip") or ""
+        )
 
         if m_serial and m_cred and m_pt:
             dev = {
@@ -869,8 +936,9 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
                 "product_type": m_pt,
                 "name": m_name or m_serial,
             }
-            if static_ip:
-                dev["ip"] = static_ip
+            ip = static_ips.get(m_serial.upper()) or static_ips.get("*")
+            if ip:
+                dev["ip"] = ip
             _save_config(api, {"devices": [dev]})
             # Register entities AND start client right away. on_connect also
             # does this on the next WS connect — duplicate add() calls are
@@ -898,9 +966,9 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
             _LOG.warning("setup OTP request failed: %s", exc)
             return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)
 
-        # Stash the static IP so UserDataResponse can apply it to whatever
-        # devices the cloud returns after the OTP completes.
-        _setup_state.static_ip = static_ip or None
+        # Stash the static IP map so UserDataResponse can apply per-serial
+        # overrides to whatever devices the cloud returns after OTP.
+        _setup_state.static_ips = static_ips
 
         return RequestUserInput(
             title={"en": "Enter the 6-digit code Dyson just emailed"},
@@ -922,17 +990,23 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
         if not devices:
             return SetupError(error_type=IntegrationSetupError.OTHER)
 
-        # Apply static IP override (if user provided one) to every device
-        # the cloud returned. Cross-VLAN setups need this; most users with
-        # multiple fans on the same network won't fill the field.
-        if _setup_state.static_ip:
+        # Apply per-serial static IP overrides. "*" key means "apply to
+        # every device" (legacy single-IP form). Devices with neither a
+        # serial-specific entry nor a wildcard fall back to mDNS as usual.
+        if _setup_state.static_ips:
+            applied = 0
+            wildcard = _setup_state.static_ips.get("*")
             for dev in devices:
-                dev["ip"] = _setup_state.static_ip
+                ip = _setup_state.static_ips.get(dev["serial"].upper()) or wildcard
+                if ip:
+                    dev["ip"] = ip
+                    applied += 1
+                    _LOG.info("static IP %s → %s", dev["serial"], ip)
             _LOG.info(
-                "applied static IP %s to %d cloud-fetched device(s)",
-                _setup_state.static_ip, len(devices),
+                "applied static IPs to %d of %d cloud-fetched device(s)",
+                applied, len(devices),
             )
-        _setup_state.static_ip = None
+        _setup_state.static_ips = {}
 
         cfg = {"devices": devices}
         _save_config(api, cfg)

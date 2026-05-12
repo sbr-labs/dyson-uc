@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.20.0 — 2026-05-12
+
+- **README rewritten with plain-English setup instructions**, "what you'll need before starting" preamble, an explicit "where do I find my fan's serial" FAQ, and a dedicated troubleshooting entry for the UCR3 widget-cache quirk (with the reboot-or-re-add-tiles workaround).
+- **Tile-cache blink on first connect.** UCR3 caches each tile's last-rendered state on Home Screen / Activity pages. Reinstalling the integration (or restarting the daemon) while tiles were on screen as UNAVAILABLE meant the cached state stuck until a full UCR3 reboot, even though entity_change events were flowing normally. The integration now performs a one-shot "state blink" on the first MQTT connect per device: every entity flashes to UNAVAILABLE for ~300ms then receives its real values, which forces the touchscreen renderer to redraw. Only fires once per device per daemon lifetime, so it's invisible on normal reconnects.
+- **Per-device Static LAN IP** for multi-device setups. The Static LAN IP field now accepts either a bare IP (legacy single-device behaviour — applied to every device the cloud returns) OR `SERIAL=IP` pairs separated by commas/newlines for any number of devices. Only the listed serials skip mDNS; devices not in the mapping fall back to mDNS as normal.
+  - Example: `AAA-XX-ZZZ0000A=192.168.1.42, BBB-YY-WWW1111B=192.168.5.10`
+  - Fixes v0.19.0 limitation where a single static IP was applied to every cloud-fetched device, which broke setups with two fans on different subnets when only one was unreachable via mDNS.
+- Backward compatible: existing setups with a plain IP keep working unchanged.
+
 ## 0.19.0 — 2026-05-12
 
 - **Static LAN IP override now applies to both cloud-OTP and manual setup paths.** Previously the IP field was buried in the manual section and only worked when you also pasted serial/credential/product_type. Users with a Dyson on a separate VLAN (or any mDNS-blocking network topology) can now do the normal Dyson account sign-in AND paste a static IP in the same screen — the integration applies the IP override to whatever devices the Dyson cloud returns. No more two-step "do cloud first, then re-do as manual" workaround.
