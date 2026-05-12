@@ -32,6 +32,7 @@ class DysonClient:
         product_type: str,
         on_state_change: Callable[[], Awaitable[None] | None],
         loop: asyncio.AbstractEventLoop | None = None,
+        static_ip: str | None = None,
     ) -> None:
         self.serial = serial
         self.credential = credential
@@ -42,10 +43,15 @@ class DysonClient:
         self._connected = False
         self._stopped = False
         self._task: asyncio.Task | None = None
+        # User-supplied LAN IP from setup config. If set, we skip mDNS
+        # entirely and always connect directly to this address. Used when
+        # the user's network doesn't resolve the device's .local hostname
+        # (some mesh routers, VLAN segregation, etc.).
+        self._static_ip = static_ip
         # Cache the IP across reconnect cycles so we skip mDNS resolution
         # on every retry — mDNS lookup is 500ms-2s and the IP rarely
         # changes mid-session.
-        self._cached_ip: str | None = None
+        self._cached_ip: str | None = static_ip
 
     @property
     def device(self):
@@ -74,6 +80,9 @@ class DysonClient:
                 pass
 
     def _resolve_host(self) -> str | None:
+        # Static IP from setup always wins — never re-resolve via mDNS.
+        if self._static_ip:
+            return self._static_ip
         # Try the cached IP first — mDNS adds 500ms-2s and is unnecessary
         # if the device hasn't moved. We only re-resolve on cold start or
         # after a cached-IP connect fails.
@@ -86,7 +95,11 @@ class DysonClient:
             self._cached_ip = ip
             return ip
         except OSError as exc:
-            _LOG.warning("mDNS resolve failed for %s: %s", hostname, exc)
+            _LOG.warning(
+                "mDNS resolve failed for %s: %s — set a Static LAN IP in "
+                "the integration setup if your network doesn't support mDNS",
+                hostname, exc,
+            )
             return None
 
     def _on_message(self, _msg_type) -> None:
@@ -121,7 +134,10 @@ class DysonClient:
                 _LOG.warning("dyson connect failed (%s) — retry in %ss", exc, _RECONNECT_DELAY)
                 # If the cached IP failed, drop it so the next iteration
                 # re-resolves via mDNS (device may have moved on the LAN).
-                self._cached_ip = None
+                # The static IP from setup is NEVER cleared — we trust the
+                # user's override and retry the same address forever.
+                if not self._static_ip:
+                    self._cached_ip = None
                 await asyncio.sleep(_RECONNECT_DELAY)
                 continue
             self._device = device

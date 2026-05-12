@@ -813,6 +813,7 @@ def _start_client(api: ucapi.IntegrationAPI, dev_cfg: dict[str, Any]) -> None:
         product_type=dev_cfg["product_type"],
         on_state_change=on_state_change,
         loop=loop,
+        static_ip=dev_cfg.get("ip") or None,
     )
     _clients[serial] = client
     client.start()
@@ -858,12 +859,15 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
         m_name = (data.get("manual_name") or "").strip()
 
         if m_serial and m_cred and m_pt:
+            m_ip = (data.get("manual_ip") or "").strip()
             dev = {
                 "serial": m_serial,
                 "credential": m_cred,
                 "product_type": m_pt,
                 "name": m_name or m_serial,
             }
+            if m_ip:
+                dev["ip"] = m_ip
             _save_config(api, {"devices": [dev]})
             for e in _build_entities(api, dev):
                 api.available_entities.add(e)

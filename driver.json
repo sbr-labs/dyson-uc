@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_intg_dyson_sbr",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "min_core_api": "0.22.0",
   "name": {
     "en": "Dyson (local)"
@@ -73,6 +73,11 @@
       {
         "id": "manual_name",
         "label": { "en": "Display name (optional)" },
+        "field": { "text": { "value": "" } }
+      },
+      {
+        "id": "manual_ip",
+        "label": { "en": "Static LAN IP (optional — only if mDNS fails on your network)" },
         "field": { "text": { "value": "" } }
       }
     ]

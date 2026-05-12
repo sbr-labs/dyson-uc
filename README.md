@@ -98,6 +98,12 @@ The integration auto-reconnects every 10 seconds if the MQTT connection drops. I
 **Setup says "Authorisation error".**
 Either the Dyson account email/password is wrong, the OTP code is stale (Dyson codes expire fast — start the flow over), or your region code doesn't match the country your Dyson account is registered in.
 
+**My device shows everything UNAVAILABLE and the logs say "mDNS resolve failed".**
+Your network isn't propagating the fan's `.local` hostname to the UCR3 (common on some mesh routers, VLAN setups and firewalls). Two fixes:
+
+1. Reserve a static DHCP lease for the fan in your router so its IP doesn't change.
+2. Re-run integration setup → use the **manual path** at the bottom of the setup screen → fill in serial / local credential / product type → also fill in the new **Static LAN IP** field with the fan's reserved address. The integration will skip mDNS and connect directly.
+
 **My TP09's commands aren't working but sensors are fine.**
 You probably hit a `set_speed` while the fan is in AUTO mode. The integration handles this — it disables AUTO before changing speed. If commands still don't land, file an issue with the integration logs attached.
 

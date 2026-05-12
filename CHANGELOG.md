@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.0 — 2026-05-12
+
+- **Static LAN IP override** in setup — a new optional field at the bottom of the manual setup section lets you paste your fan's static IP directly. Skips mDNS entirely. Fixes setups where the integration logs `mDNS resolve failed for <serial>.local: [Errno -3] Temporary failure in name resolution` because the network (mesh routers, segregated VLANs, certain firewalls) doesn't propagate the device's `.local` hostname to the UCR3.
+- The mDNS-failure log line now explicitly suggests the Static LAN IP path as the fix.
+
 ## 0.16.0 — 2026-05-12
 
 - **Multi-device responsiveness** — fixes intermittent UC-to-daemon WebSocket disconnects (visible as `BrokenPipeError` in the integration log followed by a reconnect) reported on setups with two Dyson devices.
