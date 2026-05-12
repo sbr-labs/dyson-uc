@@ -858,17 +858,25 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
         m_pt = (data.get("manual_product_type") or "").strip()
         m_name = (data.get("manual_name") or "").strip()
 
+        # Static IP override applies regardless of path — cross-VLAN setups
+        # where mDNS doesn't reach the UCR3 need it for either flow.
+        static_ip = (data.get("static_ip") or data.get("manual_ip") or "").strip()
+
         if m_serial and m_cred and m_pt:
-            m_ip = (data.get("manual_ip") or "").strip()
             dev = {
                 "serial": m_serial,
                 "credential": m_cred,
                 "product_type": m_pt,
                 "name": m_name or m_serial,
             }
-            if m_ip:
-                dev["ip"] = m_ip
+            if static_ip:
+                dev["ip"] = static_ip
             _save_config(api, {"devices": [dev]})
+            # Register entities AND start client right away. on_connect also
+            # does this on the next WS connect — duplicate add() calls are
+            # harmless ("already exists" debug log), and starting the client
+            # here guarantees MQTT begins immediately even if the UC core
+            # doesn't follow setup-complete with a fresh CONNECT event.
             for e in _build_entities(api, dev):
                 api.available_entities.add(e)
                 api.configured_entities.add(e)
@@ -890,6 +898,10 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
             _LOG.warning("setup OTP request failed: %s", exc)
             return SetupError(error_type=IntegrationSetupError.AUTHORIZATION_ERROR)
 
+        # Stash the static IP so UserDataResponse can apply it to whatever
+        # devices the cloud returns after the OTP completes.
+        _setup_state.static_ip = static_ip or None
+
         return RequestUserInput(
             title={"en": "Enter the 6-digit code Dyson just emailed"},
             settings=[{
@@ -909,6 +921,18 @@ async def setup_handler(api: ucapi.IntegrationAPI, msg: SetupDriver) -> SetupAct
 
         if not devices:
             return SetupError(error_type=IntegrationSetupError.OTHER)
+
+        # Apply static IP override (if user provided one) to every device
+        # the cloud returned. Cross-VLAN setups need this; most users with
+        # multiple fans on the same network won't fill the field.
+        if _setup_state.static_ip:
+            for dev in devices:
+                dev["ip"] = _setup_state.static_ip
+            _LOG.info(
+                "applied static IP %s to %d cloud-fetched device(s)",
+                _setup_state.static_ip, len(devices),
+            )
+        _setup_state.static_ip = None
 
         cfg = {"devices": devices}
         _save_config(api, cfg)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.0 — 2026-05-12
+
+- **Static LAN IP override now applies to both cloud-OTP and manual setup paths.** Previously the IP field was buried in the manual section and only worked when you also pasted serial/credential/product_type. Users with a Dyson on a separate VLAN (or any mDNS-blocking network topology) can now do the normal Dyson account sign-in AND paste a static IP in the same screen — the integration applies the IP override to whatever devices the Dyson cloud returns. No more two-step "do cloud first, then re-do as manual" workaround.
+- New `static_ip` field at the top level of the setup form (after region, before the manual section). The old `manual_ip` field name is still accepted for backward compatibility with anyone who'd already filled it.
+
+## 0.18.1 — 2026-05-12
+
+- Restored entity registration and client start in the setup handler — last v0.18 attempt removed them and broke setup on fresh installs where the UC core didn't reconnect immediately after `SetupComplete`. Now entities are added in both the setup handler AND on_connect — duplicate `add()` calls are harmless ("already exists" debug log).
+
 ## 0.17.0 — 2026-05-12
 
 - **Static LAN IP override** in setup — a new optional field at the bottom of the manual setup section lets you paste your fan's static IP directly. Skips mDNS entirely. Fixes setups where the integration logs `mDNS resolve failed for <serial>.local: [Errno -3] Temporary failure in name resolution` because the network (mesh routers, segregated VLANs, certain firewalls) doesn't propagate the device's `.local` hostname to the UCR3.

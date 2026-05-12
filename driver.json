@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_intg_dyson_sbr",
-  "version": "0.17.0",
+  "version": "0.19.0",
   "min_core_api": "0.22.0",
   "name": {
     "en": "Dyson (local)"
@@ -45,12 +45,28 @@
         "field": { "text": { "value": "GB" } }
       },
       {
-        "id": "manual_info",
-        "label": { "en": "— or — paste local credentials directly" },
+        "id": "static_ip_info",
+        "label": { "en": "— optional network override (applies to BOTH paths) —" },
         "field": {
           "label": {
             "value": {
-              "en": "Fill these to skip the cloud step. Find these values in your last setup's saved config (the integration will tell you in logs after first successful setup)."
+              "en": "Fill this if mDNS doesn't work on your network (e.g. fan on a different VLAN, mesh-router AP isolation). The integration will connect directly to this IP and skip mDNS. Works whether you use the cloud OTP path above or the manual path below."
+            }
+          }
+        }
+      },
+      {
+        "id": "static_ip",
+        "label": { "en": "Static LAN IP (e.g. 192.168.1.42)" },
+        "field": { "text": { "value": "" } }
+      },
+      {
+        "id": "manual_info",
+        "label": { "en": "— or — paste local credentials directly (skip cloud step)" },
+        "field": {
+          "label": {
+            "value": {
+              "en": "Fill these instead of email/password to skip the OTP flow. Best for re-installs once you've saved the credentials from a previous setup."
             }
           }
         }
@@ -73,11 +89,6 @@
       {
         "id": "manual_name",
         "label": { "en": "Display name (optional)" },
-        "field": { "text": { "value": "" } }
-      },
-      {
-        "id": "manual_ip",
-        "label": { "en": "Static LAN IP (optional — only if mDNS fails on your network)" },
         "field": { "text": { "value": "" } }
       }
     ]

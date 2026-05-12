@@ -30,6 +30,11 @@ class DysonCloudSetup:
     def __init__(self) -> None:
         self._verify: Callable[[str, str], dict] | None = None
         self._password: str | None = None
+        # Optional static LAN IP carried across the OTP round-trip so the
+        # final SetupComplete can apply it to every device fetched from the
+        # cloud — same field works for users whose fan is on a VLAN where
+        # mDNS doesn't reach the UCR3.
+        self.static_ip: str | None = None
 
     def request_otp(self, email: str, password: str, region: str) -> None:
         if not email or not password:
