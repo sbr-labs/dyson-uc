@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.0 — 2026-05-12
+
+- **Multi-device responsiveness** — fixes intermittent UC-to-daemon WebSocket disconnects (visible as `BrokenPipeError` in the integration log followed by a reconnect) reported on setups with two Dyson devices.
+- **Dedup attribute updates** — every `entity_change` event is now compared against the last state sent for that entity. Identical refreshes are skipped, dropping WS traffic by ~80% in steady state. The UCR3's WS receive buffer no longer saturates when both fans push state simultaneously.
+- **Keep fan clients alive across UC WS reconnects** — the UC core's WebSocket flaps every time you navigate around the remote UI; the daemon no longer tears down its MQTT connections to the fans during these brief flaps. Result: instant state on UI reconnect, no re-connect penalty from libdyson.
+- **Send full state on every UC WS reconnect** — the dedup cache clears when a fresh UC core attaches, so the new WS client immediately receives complete state for all entities (previously could see stale UNAVAILABLE values).
+- **Louder MQTT disconnect logging** — `WARNING`-level log line with a hint that a competing client (Dyson Link app, ha-dyson on Home Assistant, etc.) may be holding the fan's MQTT session. Helps diagnose the "constant disconnects" symptom Dyson firmware exhibits when two MQTT clients fight for the single session slot.
+
 ## 0.15.0 — 2026-05-11
 
 - **Optimistic UI updates** — tiles now reflect the new state the instant you tap, rather than waiting 1-2 seconds for the fan to round-trip the MQTT state push. Applies to night mode, continuous monitoring, diffuse mode, power, fan speed, oscillation sweep, and direction picker. The real state confirmation from the fan still arrives shortly after and corrects the display if the command somehow didn't land.

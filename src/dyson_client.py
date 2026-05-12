@@ -126,7 +126,7 @@ class DysonClient:
                 continue
             self._device = device
             self._connected = True
-            _LOG.info("connected to %s at %s", self.serial, host)
+            _LOG.info("connected to %s at %s (port 1883 MQTT)", self.serial, host)
 
             # Ask the fan to push its full state immediately so the UCR3
             # tiles paint with real values right away instead of waiting
@@ -156,5 +156,13 @@ class DysonClient:
             except Exception:
                 pass
             if not self._stopped:
-                _LOG.info("dyson disconnected, reconnecting in %ss", _RECONNECT_DELAY)
+                # Loud log — a flapping MQTT connection is the most common
+                # bug report cause, and seeing this repeat in the logs every
+                # 3 seconds is the signal to look for a competing client
+                # (Dyson app, ha-dyson, etc.) on the same fan.
+                _LOG.warning(
+                    "MQTT disconnected from %s, reconnecting in %ss "
+                    "(if this repeats, another client may be holding the fan's session)",
+                    self.serial, _RECONNECT_DELAY,
+                )
                 await asyncio.sleep(_RECONNECT_DELAY)
