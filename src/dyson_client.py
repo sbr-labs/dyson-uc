@@ -14,14 +14,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import threading
 from typing import Awaitable, Callable
 
 from libdyson import get_device
+from libdyson.discovery import DysonDiscovery
+from zeroconf import Zeroconf
 
 _LOG = logging.getLogger(__name__)
 
 _RECONNECT_DELAY = 3.0
 _ALIVE_POLL = 1.0
+# How long to wait for a multicast mDNS reply before giving up and trying
+# the OS resolver. Dyson fans answer in well under a second on a healthy
+# LAN; 6s covers a sleepy fan / slow Wi-Fi without stalling reconnects.
+_MDNS_TIMEOUT = 6.0
 
 
 class DysonClient:
@@ -83,16 +90,63 @@ class DysonClient:
             except (asyncio.CancelledError, Exception):
                 pass
 
+    def _resolve_via_mdns(self, timeout: float = _MDNS_TIMEOUT) -> str | None:
+        """Resolve the device's LAN IP with a true multicast mDNS query.
+
+        We must NOT use socket.gethostbyname() on the "<serial>.local" name:
+        that routes through the host OS resolver, which only understands
+        .local when Avahi/nss-mdns is wired into nsswitch.conf. The UCR3
+        integration sandbox has no such plumbing (firmware 2.9.4 removed
+        whatever made it resolve before — getaddrinfo now returns EAI_AGAIN,
+        "Temporary failure in name resolution").
+
+        zeroconf does the multicast query (224.0.0.251:5353) in-process, so
+        it resolves the fan regardless of the host OS resolver. We reuse
+        libdyson's own DysonDiscovery so the service type / serial parsing
+        stay in lockstep with the library.
+        """
+        result: dict[str, str] = {}
+        found = threading.Event()
+
+        # DysonDiscovery only reads `.serial` off the registered device.
+        stub = type("_Dev", (), {"serial": self.serial})()
+
+        zc = Zeroconf()
+        discovery = DysonDiscovery()
+        try:
+            discovery.start_discovery(zc)
+            discovery.register_device(stub, lambda addr: (result.__setitem__("ip", addr), found.set()))
+            if not found.wait(timeout):
+                return None
+            return result.get("ip")
+        finally:
+            try:
+                discovery.stop_discovery()
+            except Exception:
+                pass
+            try:
+                zc.close()
+            except Exception:
+                pass
+
     def _resolve_host(self) -> str | None:
         # Static IP from setup always wins — never re-resolve via mDNS.
         if self._static_ip:
             return self._static_ip
-        # Try the cached IP first — mDNS adds 500ms-2s and is unnecessary
-        # if the device hasn't moved. We only re-resolve on cold start or
-        # after a cached-IP connect fails.
+        # Try the cached IP first — mDNS discovery is unnecessary if the
+        # device hasn't moved. We only re-resolve on cold start or after a
+        # cached-IP connect fails.
         if self._cached_ip:
             return self._cached_ip
-        # Dyson serials encode region + variant (e.g. "AAA-XX-ZZZ0000A"); mDNS hostname is lowercased.
+        # Primary path: real multicast mDNS via zeroconf. Works inside the
+        # UCR3 sandbox where the OS resolver can't see .local names.
+        ip = self._resolve_via_mdns()
+        if ip:
+            self._cached_ip = ip
+            return ip
+        # Last-ditch fallback: the OS resolver. Harmless where .local isn't
+        # plumbed (just fails); succeeds on hosts/networks that do support
+        # it, so we keep it rather than hard-failing.
         hostname = f"{self.serial.lower()}.local"
         try:
             ip = socket.gethostbyname(hostname)
@@ -100,8 +154,9 @@ class DysonClient:
             return ip
         except OSError as exc:
             _LOG.warning(
-                "mDNS resolve failed for %s: %s — set a Static LAN IP in "
-                "the integration setup if your network doesn't support mDNS",
+                "mDNS resolve failed for %s (multicast timeout + OS resolver "
+                "%s) — set a Static LAN IP in the integration setup if your "
+                "network blocks mDNS (VLANs / AP isolation / mesh)",
                 hostname, exc,
             )
             return None
@@ -120,7 +175,9 @@ class DysonClient:
 
     async def _run(self) -> None:
         while not self._stopped:
-            host = self._resolve_host()
+            # Run in an executor: mDNS discovery blocks up to _MDNS_TIMEOUT
+            # waiting on the multicast reply, and must not stall the loop.
+            host = await self._loop.run_in_executor(None, self._resolve_host)
             if not host:
                 await asyncio.sleep(_RECONNECT_DELAY)
                 continue

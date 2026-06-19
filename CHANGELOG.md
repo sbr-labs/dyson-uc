@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.0 — 2026-06-19
+
+- **Fixed: fan no longer found after UCR3 firmware 2.9.4 (`mDNS resolve failed … Temporary failure in name resolution`).** Host resolution previously used `socket.gethostbyname("<serial>.local")`, which routes through the host OS resolver. That only resolves `.local` when Avahi/nss-mdns is plumbed into nsswitch — and the 2.9.4 integration sandbox no longer provides that, so every lookup failed with `EAI_AGAIN` and the MQTT client never connected (`client not ready`, all commands `503`).
+  - Resolution now goes through a real multicast mDNS query via `zeroconf`, reusing libdyson's own `DysonDiscovery` (service `_dyson_mqtt._tcp.local.`). This resolves in-process over `224.0.0.251:5353` and does **not** depend on the OS resolver, so it works inside the UCR3 sandbox regardless of firmware.
+  - The OS resolver (`gethostbyname`) is kept only as a last-ditch fallback. Static LAN IP from setup still short-circuits everything as before.
+  - mDNS discovery runs in an executor with a 6s timeout so a slow/sleepy fan can't stall the reconnect loop.
+
 ## 0.20.0 — 2026-05-12
 
 - **README rewritten with plain-English setup instructions**, "what you'll need before starting" preamble, an explicit "where do I find my fan's serial" FAQ, and a dedicated troubleshooting entry for the UCR3 widget-cache quirk (with the reboot-or-re-add-tiles workaround).
